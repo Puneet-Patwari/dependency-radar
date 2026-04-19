@@ -49,6 +49,66 @@ function riskLevelFromScore(score: number): RiskLevel {
   return 'LOW';
 }
 
+const VALID_RISK_LEVELS = new Set<RiskLevel>(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'NONE']);
+const VALID_DEPENDENCY_TYPES = new Set<DependencyType>([
+  'CONFLICT',
+  'SHARED_RESOURCE',
+  'SEQUENTIAL',
+  'DUPLICATE',
+  'NONE',
+]);
+
+function inferDependencyTypeFromExplanation(explanation: string): DependencyType | undefined {
+  const text = explanation.toLowerCase();
+
+  if (/(duplicate|duplicative|same work|overlap heavily|redundant)/.test(text)) {
+    return 'DUPLICATE';
+  }
+  if (/(conflict|incompatible|collid|clash|blocker|contradict|deprecat)/.test(text)) {
+    return 'CONFLICT';
+  }
+  if (/(shared resource|same endpoint|same api|same service|resource contention|compete for)/.test(text)) {
+    return 'SHARED_RESOURCE';
+  }
+  if (/(sequential|depends on|dependency chain|must happen before|must happen after|prerequisite)/.test(text)) {
+    return 'SEQUENTIAL';
+  }
+
+  return undefined;
+}
+
+function normalizeLlmClassification(
+  raw: { riskLevel?: string; dependencyType?: string; explanation?: string },
+  cosineScore: number,
+): { riskLevel: RiskLevel; dependencyType: DependencyType; explanation?: string } {
+  const riskLevel = VALID_RISK_LEVELS.has(raw.riskLevel as RiskLevel)
+    ? (raw.riskLevel as RiskLevel)
+    : riskLevelFromScore(cosineScore);
+
+  let dependencyType: DependencyType = VALID_DEPENDENCY_TYPES.has(raw.dependencyType as DependencyType)
+    ? (raw.dependencyType as DependencyType)
+    : 'NONE';
+
+  const explanation = typeof raw.explanation === 'string' ? raw.explanation.trim() : '';
+  const inferredType = explanation ? inferDependencyTypeFromExplanation(explanation) : undefined;
+
+  // If rationale language strongly suggests a different category, align the badge.
+  if (inferredType && inferredType !== dependencyType) {
+    console.warn('[scanDependencies] LLM type mismatch, overriding dependencyType', {
+      providedType: dependencyType,
+      inferredType,
+      explanation: explanation.slice(0, 200),
+    });
+    dependencyType = inferredType;
+  }
+
+  return {
+    riskLevel,
+    dependencyType,
+    explanation: explanation || undefined,
+  };
+}
+
 const resolver = new Resolver();
 
 // ─── Error logging resolver ─────────────────────────────────────────────────
@@ -225,14 +285,22 @@ resolver.define('scanDependencies', async (req: ResolverRequest): Promise<ScanDe
       candidatesForLLM,
     );
 
-    const llmMap: Record<string, { riskLevel: RiskLevel; dependencyType: DependencyType; explanation: string }> = {};
+    const llmMap: Record<string, { riskLevel: RiskLevel; dependencyType: DependencyType; explanation?: string }> = {};
     if (llmResults && Array.isArray(llmResults)) {
       for (const r of llmResults) {
         if (r.key) {
+          const normalized = normalizeLlmClassification(
+            {
+              riskLevel: r.riskLevel,
+              dependencyType: r.dependencyType,
+              explanation: r.explanation,
+            },
+            scoreMap[r.key] ?? 0,
+          );
           llmMap[r.key] = {
-            riskLevel: r.riskLevel as RiskLevel,
-            dependencyType: r.dependencyType as DependencyType,
-            explanation: r.explanation,
+            riskLevel: normalized.riskLevel,
+            dependencyType: normalized.dependencyType,
+            explanation: normalized.explanation,
           };
         }
       }

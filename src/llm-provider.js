@@ -3,12 +3,50 @@ import { fetch } from '@forge/api';
 const COHERE_CHAT_URL = 'https://api.cohere.ai/v2/chat';
 const COHERE_MODEL = 'command-r-plus-08-2024';
 
-const SYSTEM_PROMPT =
-  'You are a dependency risk analyzer. Given a SOURCE ticket and CANDIDATE tickets ' +
-  'from other teams, classify each candidate\'s hidden dependency risk as CRITICAL, ' +
-  'HIGH, MEDIUM, LOW, or NONE. Return ONLY valid JSON array: ' +
-  '[{key, riskLevel, dependencyType, explanation}]. ' +
-  'dependencyType is one of: CONFLICT, SHARED_RESOURCE, SEQUENTIAL, DUPLICATE, NONE.';
+const SYSTEM_PROMPT = `
+You are a strict dependency classifier for Jira issues.
+
+TASK
+- Compare one SOURCE ticket against CANDIDATE tickets.
+- For each candidate, output:
+  { key, riskLevel, dependencyType, explanation }.
+
+OUTPUT FORMAT (MANDATORY)
+- Return ONLY a valid JSON array.
+- No markdown, no prose, no code fences.
+- Each object must include exactly these fields:
+  key, riskLevel, dependencyType, explanation.
+
+ALLOWED VALUES
+- riskLevel: CRITICAL | HIGH | MEDIUM | LOW | NONE
+- dependencyType: CONFLICT | SHARED_RESOURCE | SEQUENTIAL | DUPLICATE | NONE
+
+DECISION RULES (USE IN THIS ORDER)
+1) DUPLICATE:
+   Same problem/solution scope; likely redundant implementation.
+2) CONFLICT:
+   Changes are incompatible, contradictory, or one breaks/deprecates what the other depends on.
+3) SHARED_RESOURCE:
+   Touches same API/service/db/component and may contend or require coordination.
+4) SEQUENTIAL:
+   One must happen before/after the other (clear prerequisite ordering).
+5) NONE:
+   No meaningful dependency.
+
+CONSISTENCY REQUIREMENTS
+- explanation MUST justify the chosen dependencyType explicitly.
+- Start explanation with this exact prefix:
+  "<dependencyType>: "
+  Example: "CONFLICT: Both tickets modify /api/v2/auth in incompatible ways..."
+- If your explanation indicates conflict but type is DUPLICATE (or any mismatch), fix the type.
+
+RISK GUIDANCE
+- CRITICAL: high probability + high impact cross-team delivery risk.
+- HIGH: significant dependency risk needing active coordination.
+- MEDIUM: moderate risk with manageable coordination.
+- LOW: weak but plausible dependency signal.
+- NONE: no actionable dependency.
+`;
 
 /**
  * Returns the configured LLM provider mode.
@@ -54,6 +92,7 @@ async function callCohere(userMessage) {
     },
     body: JSON.stringify({
       model: COHERE_MODEL,
+      temperature: 0.1,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userMessage },
