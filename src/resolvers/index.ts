@@ -64,7 +64,7 @@ function inferDependencyTypeFromExplanation(explanation: string): DependencyType
   if (/(duplicate|duplicative|same work|overlap heavily|redundant)/.test(text)) {
     return 'DUPLICATE';
   }
-  if (/(conflict|incompatible|collid|clash|blocker|contradict|deprecat)/.test(text)) {
+  if (/(conflict|incompatible|collid|clash|blocker|contradict)/.test(text)) {
     return 'CONFLICT';
   }
   if (/(shared resource|same endpoint|same api|same service|resource contention|compete for)/.test(text)) {
@@ -75,6 +75,15 @@ function inferDependencyTypeFromExplanation(explanation: string): DependencyType
   }
 
   return undefined;
+}
+
+function extractDependencyTypePrefix(explanation: string): DependencyType | undefined {
+  const explicitTypeMatch = explanation.match(
+    /^\s*(CONFLICT|SHARED_RESOURCE|SEQUENTIAL|DUPLICATE|NONE)\s*:/i,
+  );
+  return explicitTypeMatch?.[1]
+    ? (explicitTypeMatch[1].toUpperCase() as DependencyType)
+    : undefined;
 }
 
 function normalizeLlmClassification(
@@ -90,15 +99,19 @@ function normalizeLlmClassification(
     : 'NONE';
 
   const explanation = typeof raw.explanation === 'string' ? raw.explanation.trim() : '';
+  const explicitType = explanation ? extractDependencyTypePrefix(explanation) : undefined;
   const inferredType = explanation ? inferDependencyTypeFromExplanation(explanation) : undefined;
 
-  // If rationale language strongly suggests a different category, align the badge.
-  if (inferredType && inferredType !== dependencyType) {
+  // Prefer explicit explanation prefix when present (prompt requires "<TYPE>: ...").
+  if (explicitType && explicitType !== dependencyType) {
     console.warn('[scanDependencies] LLM type mismatch, overriding dependencyType', {
       providedType: dependencyType,
-      inferredType,
+      inferredType: explicitType,
       explanation: explanation.slice(0, 200),
     });
+    dependencyType = explicitType;
+  } else if (!VALID_DEPENDENCY_TYPES.has(raw.dependencyType as DependencyType) && inferredType) {
+    // Only use keyword inference when the model returned an invalid dependencyType.
     dependencyType = inferredType;
   }
 

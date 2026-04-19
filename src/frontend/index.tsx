@@ -22,6 +22,8 @@ import type {
   CreateIssueLinkResponse,
 } from '../types';
 
+const LIVE_REFRESH_ENABLED = process.env.NODE_ENV !== 'test';
+
 // ─── Preview Mode Detection ─────────────────────────────────────────────────
 const isPreview =
   typeof window !== 'undefined' &&
@@ -114,10 +116,43 @@ const explanationStyle = xcss({
 // ─── App Component ──────────────────────────────────────────────────────────
 export const App = (): JSX.Element => {
   const context = useProductContext();
+  const issueKey = context?.extension?.issue?.key as string | undefined;
   const [candidates, setCandidates] = useState<CandidateIssue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [llmEnabled, setLlmEnabled] = useState(false);
+
+  const scanDependencies = useCallback(
+    async (key: string, isInitialLoad = false) => {
+      if (isInitialLoad) {
+        setLoading(true);
+      }
+      try {
+        const result = (await invoke('scanDependencies', { issueKey: key })) as ScanDependenciesResponse;
+
+        if (!result.success) {
+          if (isInitialLoad) {
+            setError(result.error || 'Dependency scan failed.');
+          }
+          return;
+        }
+
+        setError(null);
+        setCandidates(result.candidates);
+        setLlmEnabled(result.llmEnabled);
+      } catch (err) {
+        console.error('Error scanning for dependencies:', err);
+        if (isInitialLoad) {
+          setError('Failed to scan for dependencies. Please try again.');
+        }
+      } finally {
+        if (isInitialLoad) {
+          setLoading(false);
+        }
+      }
+    },
+    [],
+  );
 
   const handleCreateLink = useCallback(
     async (sourceIssueKey: string, targetIssueKey: string) => {
@@ -133,6 +168,13 @@ export const App = (): JSX.Element => {
               c.key === targetIssueKey ? { ...c, isLinked: true } : c,
             ),
           );
+          showFlag({
+            id: `link-ok-${targetIssueKey}`,
+            title: `Linked to ${targetIssueKey}`,
+            description: 'Refresh the page to see it in Linked Work Items',
+            type: 'success',
+            isAutoDismiss: true,
+          });
         } else {
           showFlag({
             id: `link-error-${targetIssueKey}`,
@@ -168,34 +210,32 @@ export const App = (): JSX.Element => {
 
     if (!context) return;
 
-    const issueKey = context.extension?.issue?.key as string | undefined;
     if (!issueKey) {
       setError('Could not determine the current issue.');
       setLoading(false);
       return;
     }
 
-    const scan = async () => {
-      try {
-        const result = (await invoke('scanDependencies', { issueKey })) as ScanDependenciesResponse;
+    scanDependencies(issueKey, true);
 
-        if (!result.success) {
-          setError(result.error || 'Dependency scan failed.');
-          return;
-        }
+    if (!LIVE_REFRESH_ENABLED) {
+      return;
+    }
 
-        setCandidates(result.candidates);
-        setLlmEnabled(result.llmEnabled);
-      } catch (err) {
-        console.error('Error scanning for dependencies:', err);
-        setError('Failed to scan for dependencies. Please try again.');
-      } finally {
-        setLoading(false);
+    const refresh = () => {
+      if (!document.hidden) {
+        void scanDependencies(issueKey, false);
       }
     };
 
-    scan();
-  }, [context]);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [context, issueKey, scanDependencies]);
 
   // ── Loading State ───────────────────────────────────────────────────────
   if (loading) {
@@ -235,8 +275,6 @@ export const App = (): JSX.Element => {
   }
 
   // ── Results ─────────────────────────────────────────────────────────────
-  const issueKey = context?.extension?.issue?.key as string | undefined;
-
   return (
     <Box xcss={containerStyle}>
       <Stack space="space.150">

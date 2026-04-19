@@ -276,6 +276,86 @@ describe('scanDependencies resolver', () => {
     expect(result.data.candidates[0].explanation).toBe('Auth token expiry blocks downstream services.');
   });
 
+  it('prefers explanation prefix when it conflicts with dependencyType field', async () => {
+    addIssueFetchFixture();
+    mockIsLLMEnabled.mockReturnValue(true);
+
+    mockQueryVectors.mockResolvedValue([
+      { id: 'MOB-1', score: 0.62, metadata: { summary: 'Mobile auth update', projectKey: 'MOB', status: 'To Do' } },
+    ]);
+
+    harness.addFixture('POST', '/rest/api/3/search/jql', {
+      status: 200,
+      body: {
+        issues: [{
+          key: 'MOB-1',
+          fields: {
+            summary: 'Update mobile login screen for new auth flow',
+            project: { key: 'MOB', name: 'Mobile' },
+            status: { name: 'To Do' },
+            description: null,
+          },
+        }],
+      },
+    });
+
+    mockAnalyzeDependencies.mockResolvedValue([
+      {
+        key: 'MOB-1',
+        riskLevel: 'MEDIUM',
+        dependencyType: 'CONFLICT',
+        explanation: 'SEQUENTIAL: Mobile updates should follow backend auth migration.',
+      },
+    ]);
+
+    const result = await harness.invoke<ScanDependenciesResponse>('scanDependencies', {
+      payload: { issueKey: 'TEST-1' },
+    });
+
+    expect(result.data.success).toBe(true);
+    expect(result.data.candidates[0].dependencyType).toBe('SEQUENTIAL');
+  });
+
+  it('does not override valid dependencyType based on keyword-only explanation text', async () => {
+    addIssueFetchFixture();
+    mockIsLLMEnabled.mockReturnValue(true);
+
+    mockQueryVectors.mockResolvedValue([
+      { id: 'KAN-2', score: 0.64, metadata: { summary: 'Deprecation follow-up', projectKey: 'KAN', status: 'To Do' } },
+    ]);
+
+    harness.addFixture('POST', '/rest/api/3/search/jql', {
+      status: 200,
+      body: {
+        issues: [{
+          key: 'KAN-2',
+          fields: {
+            summary: 'Coordinate API deprecation cleanup',
+            project: { key: 'KAN', name: 'Kanban' },
+            status: { name: 'To Do' },
+            description: null,
+          },
+        }],
+      },
+    });
+
+    mockAnalyzeDependencies.mockResolvedValue([
+      {
+        key: 'KAN-2',
+        riskLevel: 'MEDIUM',
+        dependencyType: 'SEQUENTIAL',
+        explanation: 'This work is impacted by the deprecation timeline in another project.',
+      },
+    ]);
+
+    const result = await harness.invoke<ScanDependenciesResponse>('scanDependencies', {
+      payload: { issueKey: 'TEST-1' },
+    });
+
+    expect(result.data.success).toBe(true);
+    expect(result.data.candidates[0].dependencyType).toBe('SEQUENTIAL');
+  });
+
   it('falls back to cosine scoring when LLM returns null', async () => {
     addIssueFetchFixture();
     mockIsLLMEnabled.mockReturnValue(false);

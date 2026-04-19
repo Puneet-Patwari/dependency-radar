@@ -24,7 +24,7 @@ flowchart LR
     L --> M[Candidate Dependencies in UI]
 
     M --> N[Create Jira Issue Link]
-    N --> O[User Feedback Loop (Confirmed Link)]
+    N --> O[User Feedback Loop - Confirmed Link]
 ```
 
 ## Core Components
