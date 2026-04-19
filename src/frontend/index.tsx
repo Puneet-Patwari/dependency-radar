@@ -13,144 +13,83 @@ import ForgeReconciler, {
   xcss,
   useProductContext,
 } from '@forge/react';
-import { invoke, requestJira, showFlag } from '@forge/bridge';
+import { invoke, showFlag } from '@forge/bridge';
 import { setupGlobalErrorHandlers, ErrorBoundary } from './utils/errorLogger';
-import type { CandidateIssue, CreateIssueLinkResponse } from '../types';
+import type {
+  CandidateIssue,
+  RiskLevel,
+  ScanDependenciesResponse,
+  CreateIssueLinkResponse,
+} from '../types';
 
 // ─── Preview Mode Detection ─────────────────────────────────────────────────
 const isPreview =
   typeof window !== 'undefined' &&
   (window as unknown as Record<string, unknown>).__FORGE_PREVIEW__ === true;
 
-// ─── Stop Words ─────────────────────────────────────────────────────────────
-const STOP_WORDS = new Set([
-  'the', 'and', 'is', 'to', 'a', 'in', 'for', 'of', 'it', 'on',
-  'at', 'by', 'with', 'from', 'that', 'this', 'are', 'was', 'be',
-  'as', 'an',
-]);
-
-// ─── ADF Text Extraction ────────────────────────────────────────────────────
-interface AdfNode {
-  type: string;
-  text?: string;
-  content?: AdfNode[];
-}
-
-export function extractTextFromAdf(node: AdfNode | null | undefined): string {
-  if (!node) return '';
-  let result = '';
-  if (node.text) {
-    result += node.text + ' ';
-  }
-  if (node.content && Array.isArray(node.content)) {
-    for (const child of node.content) {
-      result += extractTextFromAdf(child);
-    }
-  }
-  return result;
-}
-
-// ─── Keyword Extraction ─────────────────────────────────────────────────────
-export function extractKeywords(text: string): string[] {
-  const tokens = text
-    .split(/\s+/)
-    .map((t) => t.toLowerCase().replace(/[^a-z0-9]/g, ''))
-    .filter((t) => t.length >= 3)
-    .filter((t) => !STOP_WORDS.has(t));
-
-  const unique = [...new Set(tokens)];
-  return unique.slice(0, 10);
-}
-
-// ─── Match Scoring ──────────────────────────────────────────────────────────
-export function scoreCandidate(
-  keywords: string[],
-  summary: string,
-  description: AdfNode | string | null | undefined,
-  issueKey: string,
-  projectName: string,
-): CandidateIssue | null {
-  const descText =
-    typeof description === 'string'
-      ? description
-      : extractTextFromAdf(description as AdfNode | null | undefined);
-  const combined = (summary + ' ' + descText).toLowerCase();
-
-  let matchCount = 0;
-  for (const kw of keywords) {
-    if (combined.includes(kw)) {
-      matchCount++;
-    }
-  }
-
-  if (matchCount === 0) return null;
-
-  let matchLevel: CandidateIssue['matchLevel'];
-  if (matchCount >= 3) {
-    matchLevel = 'High Match';
-  } else if (matchCount === 2) {
-    matchLevel = 'Medium Match';
-  } else {
-    matchLevel = 'Low Match';
-  }
-
-  return {
-    key: issueKey,
-    summary,
-    projectName,
-    matchCount,
-    matchLevel,
-    isLinked: false,
-  };
-}
-
-// ─── Lozenge Appearance Mapping ─────────────────────────────────────────────
-function getLozengeAppearance(
-  matchLevel: CandidateIssue['matchLevel'],
-): 'removed' | 'moved' | 'success' {
-  switch (matchLevel) {
-    case 'High Match':
-      return 'removed';
-    case 'Medium Match':
-      return 'moved';
-    case 'Low Match':
-      return 'success';
-  }
-}
-
-// ─── JQL Builder ────────────────────────────────────────────────────────────
-export function buildJql(keywords: string[], currentProjectKey: string): string {
-  const keywordsJql = keywords.join(' OR ');
-  return `text ~ "${keywordsJql}" AND project != ${currentProjectKey} AND statusCategory != Done AND created >= -90d`;
-}
-
 // ─── Mock Data for Preview Mode ─────────────────────────────────────────────
 const MOCK_CANDIDATES: CandidateIssue[] = [
   {
     key: 'INFRA-201',
     summary: 'Database connection pooling timeout under load',
+    status: 'In Progress',
     projectName: 'Infrastructure',
-    matchCount: 4,
-    matchLevel: 'High Match',
+    similarity: 0.91,
+    riskLevel: 'CRITICAL',
+    dependencyType: 'SHARED_RESOURCE',
+    explanation: 'Both issues involve database connection pool exhaustion under concurrent load.',
     isLinked: false,
   },
   {
     key: 'PERF-88',
     summary: 'API response time degradation in authentication service',
+    status: 'Open',
     projectName: 'Performance',
-    matchCount: 2,
-    matchLevel: 'Medium Match',
+    similarity: 0.74,
+    riskLevel: 'HIGH',
+    dependencyType: 'SEQUENTIAL',
+    explanation: 'Auth service latency directly blocks downstream API calls referenced in source ticket.',
     isLinked: false,
   },
   {
     key: 'SEC-45',
     summary: 'Token refresh mechanism needs retry logic',
+    status: 'To Do',
     projectName: 'Security',
-    matchCount: 1,
-    matchLevel: 'Low Match',
+    similarity: 0.58,
+    riskLevel: 'MEDIUM',
+    dependencyType: 'CONFLICT',
+    isLinked: false,
+  },
+  {
+    key: 'DATA-12',
+    summary: 'Migrate legacy user table to new schema',
+    status: 'In Review',
+    projectName: 'Data Platform',
+    similarity: 0.42,
+    riskLevel: 'LOW',
+    dependencyType: 'NONE',
     isLinked: false,
   },
 ];
+
+// ─── Risk-level → Lozenge mapping ───────────────────────────────────────────
+function getLozengeAppearance(
+  riskLevel: RiskLevel,
+): 'removed' | 'moved' | 'success' | 'default' | 'new' {
+  switch (riskLevel) {
+    case 'CRITICAL':
+      return 'removed';
+    case 'HIGH':
+      return 'new';
+    case 'MEDIUM':
+      return 'moved';
+    case 'LOW':
+      return 'success';
+    case 'NONE':
+      return 'default';
+  }
+}
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
 const containerStyle = xcss({
@@ -166,12 +105,19 @@ const cardStyle = xcss({
   borderColor: 'color.border',
 });
 
+const explanationStyle = xcss({
+  padding: 'space.100',
+  backgroundColor: 'color.background.information',
+  borderRadius: 'radius.xsmall',
+});
+
 // ─── App Component ──────────────────────────────────────────────────────────
 export const App = (): JSX.Element => {
   const context = useProductContext();
   const [candidates, setCandidates] = useState<CandidateIssue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [llmEnabled, setLlmEnabled] = useState(false);
 
   const handleCreateLink = useCallback(
     async (sourceIssueKey: string, targetIssueKey: string) => {
@@ -215,11 +161,11 @@ export const App = (): JSX.Element => {
 
     if (isPreview) {
       setCandidates(MOCK_CANDIDATES);
+      setLlmEnabled(true);
       setLoading(false);
       return;
     }
 
-    // Wait for context to load
     if (!context) return;
 
     const issueKey = context.extension?.issue?.key as string | undefined;
@@ -229,77 +175,26 @@ export const App = (): JSX.Element => {
       return;
     }
 
-    const fetchDependencies = async () => {
+    const scan = async () => {
       try {
-        // Step 1: Fetch current issue
-        const issueResponse = await requestJira(
-          `/rest/api/3/issue/${issueKey}?fields=summary,description,project`,
-        );
+        const result = (await invoke('scanDependencies', { issueKey })) as ScanDependenciesResponse;
 
-        if (!issueResponse.ok) {
-          setError('Failed to fetch issue details. Please check your permissions.');
-          setLoading(false);
+        if (!result.success) {
+          setError(result.error || 'Dependency scan failed.');
           return;
         }
 
-        const issueData = await issueResponse.json();
-        const summary: string = issueData.fields?.summary || '';
-        const description = issueData.fields?.description;
-        const projectKey: string = issueData.fields?.project?.key || '';
-
-        // Step 2: Extract keywords
-        const descriptionText = extractTextFromAdf(description);
-        const allText = summary + ' ' + descriptionText;
-        const keywords = extractKeywords(allText);
-
-        if (keywords.length === 0) {
-          setCandidates([]);
-          setLoading(false);
-          return;
-        }
-
-        // Step 3: Build JQL and search
-        const jql = buildJql(keywords, projectKey);
-        const encodedJql = encodeURIComponent(jql);
-        const searchResponse = await requestJira(
-          `/rest/api/3/search?jql=${encodedJql}&maxResults=20&fields=summary,project,description`,
-        );
-
-        if (!searchResponse.ok) {
-          setCandidates([]);
-          setLoading(false);
-          return;
-        }
-
-        const searchData = await searchResponse.json();
-        const issues = searchData.issues || [];
-
-        // Step 4: Score and sort candidates
-        const scored: CandidateIssue[] = [];
-        for (const issue of issues) {
-          const candidate = scoreCandidate(
-            keywords,
-            issue.fields?.summary || '',
-            issue.fields?.description,
-            issue.key,
-            issue.fields?.project?.name || issue.fields?.project?.key || '',
-          );
-          if (candidate) {
-            scored.push(candidate);
-          }
-        }
-
-        scored.sort((a, b) => b.matchCount - a.matchCount);
-        setCandidates(scored);
+        setCandidates(result.candidates);
+        setLlmEnabled(result.llmEnabled);
       } catch (err) {
         console.error('Error scanning for dependencies:', err);
-        setCandidates([]);
+        setError('Failed to scan for dependencies. Please try again.');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchDependencies();
+    scan();
   }, [context]);
 
   // ── Loading State ───────────────────────────────────────────────────────
@@ -333,7 +228,7 @@ export const App = (): JSX.Element => {
       <Box xcss={containerStyle}>
         <EmptyState
           header="No latent dependencies detected"
-          description="No related issues were found in other projects within the last 90 days."
+          description="No related issues were found in other projects."
         />
       </Box>
     );
@@ -345,23 +240,35 @@ export const App = (): JSX.Element => {
   return (
     <Box xcss={containerStyle}>
       <Stack space="space.150">
-        <Text color="color.text.subtle" size="small" weight="regular">
-          {`Found ${candidates.length} potential ${candidates.length === 1 ? 'dependency' : 'dependencies'}`}
-        </Text>
+        <Inline space="space.100" alignBlock="center" spread="space-between">
+          <Text color="color.text.subtle" size="small" weight="regular">
+            {`Found ${candidates.length} potential ${candidates.length === 1 ? 'dependency' : 'dependencies'}`}
+          </Text>
+          {llmEnabled && (
+            <Lozenge appearance="new">AI Analysis</Lozenge>
+          )}
+        </Inline>
+
         {candidates.map((candidate) => (
           <Box key={candidate.key} xcss={cardStyle}>
             <Stack space="space.100">
+              {/* Header row: issue key + badges + link action */}
               <Inline space="space.100" alignBlock="center" spread="space-between">
                 <Inline space="space.100" alignBlock="center">
                   <Link href={`/browse/${candidate.key}`}>
                     {candidate.key}
                   </Link>
                   <Lozenge
-                    appearance={getLozengeAppearance(candidate.matchLevel)}
+                    appearance={getLozengeAppearance(candidate.riskLevel)}
                     isBold
                   >
-                    {candidate.matchLevel}
+                    {candidate.riskLevel}
                   </Lozenge>
+                  {candidate.dependencyType !== 'NONE' && (
+                    <Lozenge appearance="default">
+                      {candidate.dependencyType}
+                    </Lozenge>
+                  )}
                 </Inline>
                 {candidate.isLinked ? (
                   <Text color="color.text.subtle" size="small" weight="regular">
@@ -378,10 +285,37 @@ export const App = (): JSX.Element => {
                   </Button>
                 )}
               </Inline>
+
+              {/* Summary */}
               <Text size="small" weight="regular">{candidate.summary}</Text>
-              <Text color="color.text.subtlest" size="small" weight="regular">
-                {candidate.projectName}
-              </Text>
+
+              {/* Metadata row: project, status, similarity */}
+              <Inline space="space.100" alignBlock="center">
+                <Text color="color.text.subtlest" size="small" weight="regular">
+                  {candidate.projectName}
+                </Text>
+                <Text color="color.text.subtlest" size="small" weight="regular">
+                  ·
+                </Text>
+                <Text color="color.text.subtlest" size="small" weight="regular">
+                  {candidate.status}
+                </Text>
+                <Text color="color.text.subtlest" size="small" weight="regular">
+                  ·
+                </Text>
+                <Text color="color.text.subtle" size="small" weight="bold">
+                  {`${Math.round(candidate.similarity * 100)}% similar`}
+                </Text>
+              </Inline>
+
+              {/* LLM explanation (when available) */}
+              {candidate.explanation && (
+                <Box xcss={explanationStyle}>
+                  <Text color="color.text.information" size="small" weight="regular">
+                    {candidate.explanation}
+                  </Text>
+                </Box>
+              )}
             </Stack>
           </Box>
         ))}

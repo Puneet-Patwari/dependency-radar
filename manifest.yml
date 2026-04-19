@@ -8,9 +8,27 @@ modules:
       title: "🛡️ Dependency Radar"
       icon: "https://developer.atlassian.com/platform/forge/images/icons/issue-panel-\
         icon.svg"
+  trigger:
+    - key: index-on-create
+      function: indexIssue
+      events:
+        - avi:jira:created:issue
+    - key: index-on-update
+      function: indexIssue
+      events:
+        - avi:jira:updated:issue
+  webtrigger:
+    - key: reindex-all
+      function: reindexFn
+      response:
+        type: dynamic
   function:
     - key: resolver
       handler: index.handler
+    - key: indexIssue
+      handler: index-trigger.indexIssue
+    - key: reindexFn
+      handler: reindex-trigger.reindexWebTrigger
 resources:
   - key: main
     path: src/frontend/index.tsx
@@ -18,10 +36,13 @@ permissions:
   scopes:
     - read:jira-work
     - write:jira-work
+    - storage:app
   external:
     fetch:
       backend:
         - address: "*.atlassian.net"
+        - address: api.cohere.ai
+        - address: "*.pinecone.io"
 app:
   runtime:
     name: nodejs22.x
