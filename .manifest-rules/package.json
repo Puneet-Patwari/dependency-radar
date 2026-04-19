@@ -1,0 +1,14 @@
+{
+  "name": "vendored-forge-manifest-rules",
+  "private": true,
+  "version": "internal-snapshot",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "validate-manifest": "dist/cli.js"
+  },
+  "dependencies": {
+    "yaml": "^2.7.0"
+  },
+  "description": "Vendored snapshot of @my/forge-manifest-rules for template use."
+}

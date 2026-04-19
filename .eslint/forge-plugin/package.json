@@ -1,0 +1,8 @@
+{
+  "name": "vendored-forge-eslint-plugin",
+  "private": true,
+  "version": "internal-snapshot",
+  "main": "dist/index.js",
+  "type": "module",
+  "description": "Vendored snapshot of @my/forge-eslint for template use."
+}

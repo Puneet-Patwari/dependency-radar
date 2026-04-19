@@ -1,0 +1,19 @@
+{
+  "name": "@forge/testing-framework",
+  "private": true,
+  "version": "0.0.0-local",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./shims/forge-api": "./dist/shims/forge-api/index.js",
+    "./shims/forge-bridge": "./dist/shims/forge-bridge/index.js",
+    "./shims/forge-kvs": "./dist/shims/forge-kvs/index.js",
+    "./shims/forge-react": "./dist/shims/forge-react/index.js",
+    "./shims/forge-resolver": "./dist/shims/forge-resolver/index.js",
+    "./shims/forge-events": "./dist/shims/forge-events/index.js"
+  },
+  "dependencies": {
+    "yaml": "^2.7.0"
+  },
+  "description": "Local testing framework for Atlassian Forge apps."
+}

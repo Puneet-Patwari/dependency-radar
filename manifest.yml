@@ -1,0 +1,28 @@
+modules:
+  jira:issuePanel:
+    - key: dependency-radar-panel
+      resource: main
+      resolver:
+        function: resolver
+      render: native
+      title: "🛡️ Dependency Radar"
+      icon: "https://developer.atlassian.com/platform/forge/images/icons/issue-panel-\
+        icon.svg"
+  function:
+    - key: resolver
+      handler: index.handler
+resources:
+  - key: main
+    path: src/frontend/index.tsx
+permissions:
+  scopes:
+    - read:jira-work
+    - write:jira-work
+  external:
+    fetch:
+      backend:
+        - address: "*.atlassian.net"
+app:
+  runtime:
+    name: nodejs22.x
+  id: ari:cloud:ecosystem::app/1fcc5150-9a01-464a-b126-62c76ef0e874
