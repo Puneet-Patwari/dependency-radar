@@ -39,6 +39,7 @@ CONSISTENCY REQUIREMENTS
   "<dependencyType>: "
   Example: "CONFLICT: Both tickets modify /api/v2/auth in incompatible ways..."
 - If your explanation indicates conflict but type is DUPLICATE (or any mismatch), fix the type.
+- Keep explanation concise: one to two sentences after the prefix, maximum 50 words.
 
 RISK GUIDANCE
 - CRITICAL: high probability + high impact cross-team delivery risk.
@@ -46,6 +47,29 @@ RISK GUIDANCE
 - MEDIUM: moderate risk with manageable coordination.
 - LOW: weak but plausible dependency signal.
 - NONE: no actionable dependency.
+
+STATUS-AWARE RISK ESCALATION
+Each ticket includes "status" and "statusCategory" fields.
+For risk rules, normalize statusCategory into exactly one of:
+- ToDo
+- InProgress
+- Done
+Normalization:
+- "To Do" -> ToDo
+- "In Progress" -> InProgress
+- "Done" -> Done
+Use these rules to adjust riskLevel AFTER determining dependencyType:
+- If dependencyType is CONFLICT or SHARED_RESOURCE:
+  - Source is InProgress and candidate is ToDo -> escalate riskLevel by one tier (e.g. MEDIUM -> HIGH).
+  - Candidate is InProgress -> escalate riskLevel by one tier (e.g. MEDIUM -> HIGH).
+  - Both source AND candidate are InProgress -> escalate by two tiers (e.g. MEDIUM -> CRITICAL).
+  - Candidate or Source is Done -> don't change riskLevel.
+- For SEQUENTIAL dependencies:
+  - If the prerequisite ticket is ToDo or InProgress and the dependent ticket is also active -> escalate by one tier.
+- DUPLICATE: no status-based adjustment.
+- Never escalate above CRITICAL or de-escalate below NONE.
+- Hard constraint: ToDo + ToDo must never be treated as status-based escalation.
+- Mention the status-based reasoning in your explanation when it affects riskLevel.
 `;
 
 /**
@@ -127,9 +151,9 @@ async function callCohere(userMessage) {
  * Every code path is wrapped in try/catch so a failing or misconfigured LLM
  * never breaks the app — it gracefully degrades to cosine-only results.
  *
- * @param {{ key: string, summary: string, description?: string }} sourceTicket
+ * @param {{ key: string, summary: string, description?: string, status?: string, statusCategory?: string }} sourceTicket
  *   The Jira issue currently being viewed.
- * @param {Array<{ key: string, summary: string, score: number }>} candidateTickets
+ * @param {Array<{ key: string, summary: string, score: number, status?: string, statusCategory?: string }>} candidateTickets
  *   Candidate matches returned by Pinecone vector search.
  * @returns {Promise<Array<{ key: string, riskLevel: string, dependencyType: string, explanation: string }>|null>}
  *   Structured risk classifications, or null when LLM is disabled / errored.

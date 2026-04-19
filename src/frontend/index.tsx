@@ -93,24 +93,41 @@ function getLozengeAppearance(
   }
 }
 
+function getStatusLozengeAppearance(
+  status: string,
+): 'moved' | 'success' | 'default' {
+  const normalized = status.toLowerCase();
+  if (/(done|resolved|closed|complete|completed|released)/.test(normalized)) {
+    return 'success';
+  }
+  if (/(in progress|review|qa|testing|blocked|in development)/.test(normalized)) {
+    return 'moved';
+  }
+  return 'default';
+}
+
 // ─── Styles ─────────────────────────────────────────────────────────────────
 const containerStyle = xcss({
   padding: 'space.200',
 });
 
 const cardStyle = xcss({
-  padding: 'space.150',
+  padding: 'space.200',
   backgroundColor: 'color.background.neutral.subtle',
-  borderRadius: 'radius.small',
+  borderRadius: 'radius.medium',
   borderWidth: 'border.width',
   borderStyle: 'solid',
   borderColor: 'color.border',
 });
 
 const explanationStyle = xcss({
-  padding: 'space.100',
+  paddingBlock: 'space.100',
+  paddingInline: 'space.150',
   backgroundColor: 'color.background.information',
   borderRadius: 'radius.xsmall',
+  borderLeftWidth: 'border.width',
+  borderLeftStyle: 'solid',
+  borderLeftColor: 'color.border.brand',
 });
 
 // ─── App Component ──────────────────────────────────────────────────────────
@@ -327,31 +344,27 @@ export const App = (): JSX.Element => {
               {/* Summary */}
               <Text size="small" weight="regular">{candidate.summary}</Text>
 
-              {/* Metadata row: project, status, similarity */}
+              {/* Metadata row: project + status */}
               <Inline space="space.100" alignBlock="center">
-                <Text color="color.text.subtlest" size="small" weight="regular">
-                  {candidate.projectName}
-                </Text>
-                <Text color="color.text.subtlest" size="small" weight="regular">
-                  ·
-                </Text>
-                <Text color="color.text.subtlest" size="small" weight="regular">
-                  {candidate.status}
-                </Text>
-                <Text color="color.text.subtlest" size="small" weight="regular">
-                  ·
-                </Text>
-                <Text color="color.text.subtle" size="small" weight="bold">
-                  {`${Math.round(candidate.similarity * 100)}% similar`}
-                </Text>
+                <Lozenge appearance="default">
+                  {`Project: ${candidate.projectName || 'Unknown'}`}
+                </Lozenge>
+                <Lozenge appearance={getStatusLozengeAppearance(candidate.status)}>
+                  {`Status: ${candidate.status || 'Unknown'}`}
+                </Lozenge>
               </Inline>
 
               {/* LLM explanation (when available) */}
               {candidate.explanation && (
                 <Box xcss={explanationStyle}>
-                  <Text color="color.text.information" size="small" weight="regular">
-                    {candidate.explanation}
-                  </Text>
+                  <Stack space="space.050">
+                    <Text color="color.text.subtle" size="small" weight="semibold">
+                      AI Insight
+                    </Text>
+                    <Text color="color.text" size="small" weight="regular">
+                      {candidate.explanation}
+                    </Text>
+                  </Stack>
                 </Box>
               )}
             </Stack>

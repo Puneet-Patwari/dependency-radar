@@ -177,6 +177,7 @@ resolver.define('scanDependencies', async (req: ResolverRequest): Promise<ScanDe
     const description = issueData.fields?.description;
     const projectKey: string = issueData.fields?.project?.key || '';
     const statusName: string = issueData.fields?.status?.name || 'Unknown';
+    const statusCategory: string = issueData.fields?.status?.statusCategory?.name || 'Unknown';
     const assignee: string = issueData.fields?.assignee?.displayName
       || issueData.fields?.assignee?.accountId || 'Unassigned';
     const updatedTimestamp: string = issueData.fields?.updated || '';
@@ -253,12 +254,12 @@ resolver.define('scanDependencies', async (req: ResolverRequest): Promise<ScanDe
         body: JSON.stringify({
           jql,
           maxResults: matches.length,
-          fields: ['summary', 'project', 'status', 'description'],
+          fields: ['summary', 'project', 'status', 'description', 'assignee'],
         }),
       },
     );
 
-    const hydrated: Record<string, { summary: string; projectName: string; status: string; description?: string }> = {};
+    const hydrated: Record<string, { summary: string; projectName: string; status: string; statusCategory: string; description?: string }> = {};
     if (searchResp.ok) {
       const searchData = await searchResp.json();
       for (const issue of searchData.issues || []) {
@@ -266,6 +267,7 @@ resolver.define('scanDependencies', async (req: ResolverRequest): Promise<ScanDe
           summary: issue.fields?.summary || '',
           projectName: issue.fields?.project?.name || issue.fields?.project?.key || '',
           status: issue.fields?.status?.name || 'Unknown',
+          statusCategory: issue.fields?.status?.statusCategory?.name || 'Unknown',
           description: typeof issue.fields?.description === 'string'
             ? issue.fields.description
             : extractTextFromAdf(issue.fields?.description as AdfNode),
@@ -276,7 +278,7 @@ resolver.define('scanDependencies', async (req: ResolverRequest): Promise<ScanDe
     }
 
     // Build candidate list from matches + hydrated data (or Pinecone metadata fallback)
-    const candidatesForLLM: Array<{ key: string; summary: string; score: number; description?: string }> = [];
+    const candidatesForLLM: Array<{ key: string; summary: string; score: number; status: string; statusCategory: string; description?: string }> = [];
     const scoreMap: Record<string, number> = {};
 
     for (const match of matches) {
@@ -287,6 +289,8 @@ resolver.define('scanDependencies', async (req: ResolverRequest): Promise<ScanDe
         key: match.id,
         summary: jiraData?.summary || meta.summary || match.id,
         score: match.score,
+        status: jiraData?.status || meta.status || 'Unknown',
+        statusCategory: jiraData?.statusCategory || 'Unknown',
         description: jiraData?.description,
       });
     }
@@ -294,7 +298,7 @@ resolver.define('scanDependencies', async (req: ResolverRequest): Promise<ScanDe
     // Step 6: LLM analysis or cosine-threshold fallback
     console.log('[scanDependencies] Running dependency analysis, llmEnabled:', isLLMEnabled());
     const llmResults = await analyzeDependencies(
-      { key: issueKey, summary, description: descriptionText },
+      { key: issueKey, summary, description: descriptionText, status: statusName, statusCategory },
       candidatesForLLM,
     );
 
